@@ -110,7 +110,7 @@ jobs:
           
           if [ ! -d "android" ]; then
             echo "📱 Création du projet Android..."
-            npx @react-native-community/cli@${{ env.RN_VERSION }} init MaternelleaTemp \
+            npx @react-native-community/cli@latest init MaternelleaTemp \
               --skip-install \
               --directory /tmp/rn-template \
               --title "${{ env.APP_NAME }}" \
