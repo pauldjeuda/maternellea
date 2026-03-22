@@ -49,7 +49,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  NODE_VERSION:  '18'
+  NODE_VERSION:  '20'
   JAVA_VERSION:  '17'
   RN_VERSION:    '0.76.5'
   APP_NAME:      'Maternellea'
@@ -106,8 +106,6 @@ jobs:
 
       - name: Scaffold Android native project
         run: |
-          npm install -g @react-native-community/cli@latest --legacy-peer-deps
-          
           if [ ! -d "android" ]; then
             echo "📱 Création du projet Android..."
             npx @react-native-community/cli@latest init MaternelleaTemp \
