@@ -16,14 +16,15 @@
 #   KEY_PASSWORD       Keystore password
 #   STORE_PASSWORD     Store password (often same as KEY_PASSWORD)
 #
-# ─── Optional secret ───────────────────────────────────────────────────────────
+# ─── Optional secrets ─────────────────────────────────────────────────────────
 #
 #   GITHUB_TOKEN       Auto-provided by GitHub — no setup needed
+#   SENTRY_AUTH_TOKEN  Pour le tracking des erreurs (optionnel)
 #
 # ─── First-time setup ──────────────────────────────────────────────────────────
 #
 #   1. Add the 4 secrets above in repo Settings
-#   2. Push to master — the workflow scaffolds android/, builds, and releases
+#   2. Push to master — the workflow builds and releases the APK
 
 name: Android APK — Build & Release
 
@@ -31,6 +32,16 @@ on:
   push:
     branches: [ master ]
   workflow_dispatch:          # allows manual trigger from the Actions tab
+    inputs:
+      release_type:
+        description: 'Type de release'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 # ─────────────────────────────────────────────────────────────
 # Prevent concurrent runs on the same branch
@@ -63,23 +74,34 @@ jobs:
       - name: Compute version tag
         id: version
         run: |
-          # vYYYY.MM.DD.HHMM  e.g.  v2026.03.21.1430
+          # Générer un tag basé sur la date
           TAG="v$(date -u +'%Y.%m.%d.%H%M')"
-          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
-          echo "version_name=$TAG"  >> "$GITHUB_OUTPUT"
-          # Version code: seconds since epoch / 10 (fits in int32 for many years)
-          CODE=$(( $(date -u +%s) / 10 ))
-          echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
+          
+          # Compter le nombre de commits pour un version code unique
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          VERSION_CODE=$((COMMIT_COUNT + 100))
+          
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          
+          # Extraire le nom de la release
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "release_name=Maternellea ${{ github.event.inputs.release_type }} ($TAG)" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_name=Maternellea $TAG" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── 2. Node.js ─────────────────────────────────────────
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
       # ── 3. Install JS dependencies ─────────────────────────
       - name: Install npm dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       # ── 4. Java ────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
@@ -94,100 +116,133 @@ jobs:
         uses: android-actions/setup-android@v2
 
       # ── 6. Scaffold android/ with React Native CLI ─────────
-      #       (the repo contains only JS/TS source; native folders
-      #        are generated fresh on every build so they track the
-      #        exact RN version in package.json)
       - name: Scaffold Android native project
         run: |
-          # Install the RN CLI globally
+          # Installer les outils nécessaires
           npm install -g react-native@${{ env.RN_VERSION }} --legacy-peer-deps
+          
+          # Vérifier si le dossier android existe déjà
+          if [ ! -d "android" ]; then
+            echo "📱 Création du projet Android..."
+            npx react-native init MaternelleaTemp \
+              --version ${{ env.RN_VERSION }} \
+              --skip-install \
+              --directory /tmp/rn-template \
+              --title "${{ env.APP_NAME }}" \
+              --package-name "${{ env.BUNDLE_ID }}"
+            
+            # Copier le dossier android
+            cp -r /tmp/rn-template/android ./android
+            
+            # Nettoyer les fichiers temporaires
+            rm -rf /tmp/rn-template
+          else
+            echo "✅ Dossier Android existant, utilisation existante"
+          fi
+          
+          # S'assurer que le dossier assets existe
+          mkdir -p android/app/src/main/assets
 
-          # Initialise a temp project to get the android/ template
-          npx react-native init MaternelleaTemp \
-            --version ${{ env.RN_VERSION }} \
-            --skip-install \
-            --directory /tmp/rn-template \
-            --title "${{ env.APP_NAME }}" \
-            --package-name "${{ env.BUNDLE_ID }}"
+      # ── 7. Update package.json version (optionnel) ─────────
+      - name: Update package.json version
+        run: |
+          npm version ${{ steps.version.outputs.version_name }} --no-git-tag-version || true
 
-          # Copy the android/ folder into our project
-          cp -r /tmp/rn-template/android ./android
-
-          # Patch applicationId in build.gradle
-          sed -i "s/com\.maternelleatemp/${{ env.BUNDLE_ID }}/g" \
-            android/app/build.gradle
-
-      # ── 7. Patch version code & name in build.gradle ───────
+      # ── 8. Patch version code & name in build.gradle ───────
       - name: Patch versionCode and versionName
         run: |
+          # Version Code
           sed -i \
             "s/versionCode [0-9]*/versionCode ${{ steps.version.outputs.version_code }}/g" \
             android/app/build.gradle
+          
+          # Version Name
           sed -i \
             "s/versionName \"[^\"]*\"/versionName \"${{ steps.version.outputs.version_name }}\"/g" \
             android/app/build.gradle
+          
+          echo "✅ Version patchée: code=${{ steps.version.outputs.version_code }}, name=${{ steps.version.outputs.version_name }}"
 
-      # ── 8. Decode & place keystore ─────────────────────────
+      # ── 9. Decode & place keystore ─────────────────────────
       - name: Decode keystore
+        if: secrets.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode \
-            > android/app/maternellea.keystore
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/maternellea.keystore
+          echo "✅ Keystore décodé avec succès"
 
-      # ── 9. Write keystore config to gradle.properties ──────
+      # ── 10. Write keystore config to gradle.properties ─────
       - name: Write gradle signing config
+        if: secrets.KEY_ALIAS != ''
         env:
           KEY_ALIAS:     ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD:  ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
+          # Supprimer les anciennes entrées si elles existent
+          sed -i '/MYAPP_UPLOAD_STORE_FILE/d' android/gradle.properties || true
+          sed -i '/MYAPP_UPLOAD_KEY_ALIAS/d' android/gradle.properties || true
+          sed -i '/MYAPP_UPLOAD_STORE_PASSWORD/d' android/gradle.properties || true
+          sed -i '/MYAPP_UPLOAD_KEY_PASSWORD/d' android/gradle.properties || true
+          
+          # Ajouter les nouvelles entrées
           cat >> android/gradle.properties << EOF
           MYAPP_UPLOAD_STORE_FILE=maternellea.keystore
           MYAPP_UPLOAD_KEY_ALIAS=${KEY_ALIAS}
           MYAPP_UPLOAD_STORE_PASSWORD=${STORE_PASSWORD}
           MYAPP_UPLOAD_KEY_PASSWORD=${KEY_PASSWORD}
           EOF
+          
+          echo "✅ Configuration de signature ajoutée"
 
-      # ── 10. Patch build.gradle to use the signing config ───
+      # ── 11. Patch build.gradle with signing config ─────────
       - name: Patch build.gradle with signingConfigs
         run: |
-          python3 - << 'PYEOF'
-          import re, pathlib
-
+          python3 << 'PYEOF'
+          import re
+          import pathlib
+          
           path = pathlib.Path('android/app/build.gradle')
           text = path.read_text()
-
-          signing_config = '''
+          
+          # Vérifier si signingConfigs existe déjà
+          if 'signingConfigs {' not in text:
+              signing_config = '''
+              
               signingConfigs {
                   release {
-                      storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                      storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                      keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                      keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+                      if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                          storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                          storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                          keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                          keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+                      }
                   }
               }
-          '''
-
-          # Insert after "android {" line
-          text = re.sub(
-              r'(android\s*\{)',
-              r'\1' + signing_config,
-              text, count=1
-          )
-
-          # Add signingConfig to release buildType
-          text = re.sub(
-              r'(buildTypes\s*\{[^}]*release\s*\{)',
-              r'\1\n            signingConfig signingConfigs.release',
-              text, count=1
-          )
-
-          path.write_text(text)
-          print('build.gradle patched successfully')
+              '''
+              
+              # Insérer après "android {"
+              text = re.sub(
+                  r'(android\s*\{)',
+                  r'\1' + signing_config,
+                  text, count=1
+              )
+              
+              # Ajouter signingConfig à release buildType
+              text = re.sub(
+                  r'(buildTypes\s*\{[^}]*release\s*\{)',
+                  r'\1\n            signingConfig signingConfigs.release',
+                  text, count=1
+              )
+              
+              path.write_text(text)
+              print('✅ build.gradle patched with signing config')
+          else:
+              print('✅ Signing config already present')
           PYEOF
 
-      # ── 11. Create JS bundle ────────────────────────────────
+      # ── 12. Create JS bundle ────────────────────────────────
       - name: Create JS bundle for Android
         run: |
           mkdir -p android/app/src/main/assets
@@ -197,8 +252,10 @@ jobs:
             --entry-file index.js \
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
+          
+          echo "✅ Bundle JS créé avec succès"
 
-      # ── 12. Gradle cache ────────────────────────────────────
+      # ── 13. Gradle cache ────────────────────────────────────
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
         with:
@@ -206,57 +263,101 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
-          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle.properties') }}
-          restore-keys: gradle-
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle.properties', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
 
-      # ── 13. Build release APK ───────────────────────────────
+      # ── 14. Build release APK (multiple architectures) ──────
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: |
+          # Construire l'APK release
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          
+          # Construire l'AAB (Android App Bundle) pour le Play Store
+          ./gradlew bundleRelease --no-daemon --stacktrace
         env:
           JAVA_OPTS: '-Xmx4g -XX:MaxMetaspaceSize=512m'
 
-      # ── 14. Rename APK ─────────────────────────────────────
-      - name: Rename APK
+      # ── 15. Rename and collect APK files ────────────────────
+      - name: Collect and rename artifacts
         run: |
-          TAG=${{ steps.version.outputs.tag }}
-          APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
-          APK_DST="Maternellea-${TAG}-release.apk"
-          mv "$APK_SRC" "$APK_DST"
-          echo "APK_PATH=$APK_DST" >> "$GITHUB_ENV"
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION_CODE="${{ steps.version.outputs.version_code }}"
+          
+          # Créer un dossier pour les artifacts
+          mkdir -p artifacts
+          
+          # APK universel (toutes architectures)
+          APK_UNIVERSAL="android/app/build/outputs/apk/release/app-release.apk"
+          if [ -f "$APK_UNIVERSAL" ]; then
+            cp "$APK_UNIVERSAL" "artifacts/Maternellea-${TAG}-universal.apk"
+            echo "✅ APK universel créé"
+          fi
+          
+          # APK par architecture (si disponibles)
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            APK_ARCH="android/app/build/outputs/apk/release/app-${arch}-release.apk"
+            if [ -f "$APK_ARCH" ]; then
+              cp "$APK_ARCH" "artifacts/Maternellea-${TAG}-${arch}.apk"
+              echo "✅ APK pour $arch créé"
+            fi
+          done
+          
+          # AAB (Android App Bundle)
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          if [ -f "$AAB" ]; then
+            cp "$AAB" "artifacts/Maternellea-${TAG}.aab"
+            echo "✅ AAB créé"
+          fi
+          
+          # Générer un checksum SHA256
+          cd artifacts
+          sha256sum * > checksums.txt
+          cd ..
+          
+          # Lister tous les fichiers générés
+          echo "📦 Artifacts générés :"
+          ls -lh artifacts/
+          
+          # Sauvegarder le chemin des fichiers pour la release
+          echo "ARTIFACTS_PATH=artifacts" >> "$GITHUB_ENV"
 
-      # ── 15. Upload APK as workflow artifact ─────────────────
-      - name: Upload APK artifact
+      # ── 16. Upload artifacts to workflow ────────────────────
+      - name: Upload artifacts to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: maternellea-apk-${{ steps.version.outputs.tag }}
-          path: ${{ env.APK_PATH }}
+          name: maternellea-build-${{ steps.version.outputs.tag }}
+          path: ${{ env.ARTIFACTS_PATH }}
           retention-days: 30
+          compression-level: 6
 
-      # ── 16. Create GitHub Release ───────────────────────────
+      # ── 17. Create GitHub Release with all artifacts ────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name:   ${{ steps.version.outputs.tag }}
-          name:       "Maternellea ${{ steps.version.outputs.tag }}"
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.release_name }}
           body: |
-            ## 📦 Maternellea — Release ${{ steps.version.outputs.tag }}
-
-            ### Installation
-            1. Sur votre Android : **Paramètres → Sécurité → Sources inconnues** (activer)
-            2. Télécharger l'APK ci-dessous
-            3. Ouvrir le fichier APK et installer
-
-            ### Informations
+            ## 🚀 Maternellea — ${{ steps.version.outputs.release_name }}
+            
+            ### 📱 Téléchargement
+            
+            | Type | Fichier | Description |
+            |------|---------|-------------|
+            | **APK Universal** | `Maternellea-${{ steps.version.outputs.tag }}-universal.apk` | Compatible avec tous les appareils Android |
+            | **APK ARM64** | `Maternellea-${{ steps.version.outputs.tag }}-arm64-v8a.apk` | Optimisé pour les appareils modernes |
+            | **APK ARMv7** | `Maternellea-${{ steps.version.outputs.tag }}-armeabi-v7a.apk` | Pour les appareils plus anciens |
+            | **AAB** | `Maternellea-${{ steps.version.outputs.tag }}.aab` | Pour le Play Store |
+            
+            ### 📋 Informations de build
+            
+            - **Version:** ${{ steps.version.outputs.version_name }}
+            - **Version Code:** ${{ steps.version.outputs.version_code }}
             - **Branch:** `${{ github.ref_name }}`
-            - **Commit:** `${{ github.sha }}`
+            - **Commit:** [`${{ github.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
             - **React Native:** ${{ env.RN_VERSION }}
-            - **Version code:** ${{ steps.version.outputs.version_code }}
-
-            ### Changements
-            ${{ github.event.head_commit.message }}
-          files: ${{ env.APK_PATH }}
-          draft:      false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - **Build Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+            
+            ### ✅ Checksums
+            
