@@ -30,7 +30,7 @@ name: Android APK — Build & Release
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       release_type:
