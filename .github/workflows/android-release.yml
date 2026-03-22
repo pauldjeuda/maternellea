@@ -106,7 +106,7 @@ jobs:
 
       - name: Scaffold Android native project
         run: |
-          npm install -g react-native-community/cli@${{ env.RN_VERSION }} --legacy-peer-deps
+          npm install -g @react-native-community/cli@${{ env.RN_VERSION }} --legacy-peer-deps
           
           if [ ! -d "android" ]; then
             echo "📱 Création du projet Android..."
