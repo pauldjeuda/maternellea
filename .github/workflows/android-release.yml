@@ -115,7 +115,7 @@ jobs:
               --package "${{ env.BUNDLE_ID }}"
 
 
-           if [ ! -d "/tmp/rn-template/android" ]; then   
+           if [ -d "/tmp/rn-template/android" ]; then   
             cp -r /tmp/rn-template/android ./android
             rm -rf /tmp/rn-template
           else
