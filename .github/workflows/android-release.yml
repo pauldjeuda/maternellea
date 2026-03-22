@@ -104,7 +104,28 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-     
+      - name: Scaffold Android native project
+        run: |
+          npm install -g react-native-community/cli@${{ env.RN_VERSION }} --legacy-peer-deps
+          
+          if [ ! -d "android" ]; then
+            echo "📱 Création du projet Android..."
+            npx @react-native-community/cli@${{ env.RN_VERSION }} init MaternelleaTemp \
+              --skip-install \
+              --directory /tmp/rn-template \
+              --title "${{ env.APP_NAME }}" \
+              --package "${{ env.BUNDLE_ID }}"
+
+
+           if [ ! -d "/tmp/rn-template/android" ]; then   
+            cp -r /tmp/rn-template/android ./android
+            rm -rf /tmp/rn-template
+          else
+            echo "✅ Dossier Android existant, utilisation existante"
+          fi
+          
+          mkdir -p android/app/src/main/assets
+
       - name: Update package.json version
         run: |
           npm version ${{ steps.version.outputs.version_name }} --no-git-tag-version || true
