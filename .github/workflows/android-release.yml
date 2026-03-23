@@ -108,22 +108,27 @@ jobs:
         run: |
           if [ ! -d "android" ]; then
             echo "📱 Création du projet Android..."
+            rm -rf /tmp/rn-template
+
             npx @react-native-community/cli@latest init MaternelleaTemp \
               --skip-install \
               --directory /tmp/rn-template \
               --title "${{ env.APP_NAME }}" \
-              --package "${{ env.BUNDLE_ID }}"
+              --package-name "${{ env.BUNDLE_ID }}"
 
-
-           if [ -d "/tmp/rn-template/android" ]; then   
-            cp -r /tmp/rn-template/android ./android
-            rm -rf /tmp/rn-template
+            if [ -d "/tmp/rn-template/android" ]; then
+              cp -r /tmp/rn-template/android ./android
+              echo "✅ Dossier android copié"
+            else
+              echo "❌ Le dossier /tmp/rn-template/android n'a pas été généré"
               exit 1
             fi
+
+            rm -rf /tmp/rn-template
           else
-            echo "✅ Dossier Android existant, utilisation existante"
+            echo "✅ Dossier Android existant, utilisation du dossier actuel"
           fi
-          
+
           mkdir -p android/app/src/main/assets
 
       - name: Update package.json version
