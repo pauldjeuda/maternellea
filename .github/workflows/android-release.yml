@@ -165,7 +165,7 @@ jobs:
             sed -i '/MYAPP_UPLOAD_STORE_PASSWORD/d' android/gradle.properties || true
             sed -i '/MYAPP_UPLOAD_KEY_PASSWORD/d' android/gradle.properties || true
             
-            cat >> android/gradle.properties << EOF
+            cat >> android/gradle.properties << 'EOF'
 MYAPP_UPLOAD_STORE_FILE=maternellea.keystore
 MYAPP_UPLOAD_KEY_ALIAS=${KEY_ALIAS}
 MYAPP_UPLOAD_STORE_PASSWORD=${STORE_PASSWORD}
@@ -179,7 +179,7 @@ EOF
 
       - name: Patch build.gradle with signingConfigs
         run: |
-          python3 << 'PYEOF'
+          python3 -c "
 import re
 import pathlib
 
@@ -217,7 +217,7 @@ if 'signingConfigs {' not in text:
     print('✅ build.gradle patched with signing config')
 else:
     print('✅ Signing config already present')
-PYEOF
+"
 
       - name: Create JS bundle for Android
         run: |
