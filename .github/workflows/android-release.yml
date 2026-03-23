@@ -186,7 +186,7 @@ jobs:
           path = pathlib.Path("android/app/build.gradle")
           text = path.read_text(encoding="utf-8")
 
-          # Injection de la config de release dans signingConfigs
+          # 1. Injection de la config de release dans signingConfigs
           if "release {" not in text or "MYAPP_UPLOAD_STORE_FILE" not in text:
               signing_config = """
               release {
@@ -197,18 +197,24 @@ jobs:
                       keyPassword MYAPP_UPLOAD_KEY_PASSWORD
                   }
               }"""
-              # On cherche le bloc signingConfigs {
               if "signingConfigs {" in text:
                   text = re.sub(r"(signingConfigs\s*\{)", r"\1" + signing_config, text, count=1)
               else:
-                  # Si signingConfigs n'existe pas, on le crée au début du bloc android {
                   text = re.sub(r"(android\s*\{)", r"\1\n    signingConfigs {" + signing_config + "\n    }", text, count=1)
 
-          # Assignation de la config au buildType release
-          # On cherche release { dans buildTypes {
-          build_types_part = re.search(r"buildTypes\s*\{.*release\s*\{", text, re.DOTALL)
-          if build_types_part and "signingConfig signingConfigs.release" not in build_types_part.group(0):
-              text = re.sub(r"(release\s*\{)", r"\1\n            signingConfig signingConfigs.release", text, count=1)
+          # 2. Assignation de la config au buildType release
+          # On cherche spécifiquement le bloc release { qui est EN DESSOUS de buildTypes {
+          # On utilise une recherche qui englobe buildTypes { ... release {
+          pattern = r"(buildTypes\s*\{[^{}]*release\s*\{)"
+          if "signingConfig signingConfigs.release" not in text:
+              # On s'assure de ne pas patcher le bloc signingConfigs.release par erreur
+              # On cherche l'occurrence qui vient après 'buildTypes'
+              def replace_bt(match):
+                  if "signingConfig signingConfigs.release" in match.group(0):
+                      return match.group(0)
+                  return match.group(1) + "\n            signingConfig signingConfigs.release"
+              
+              text = re.sub(pattern, replace_bt, text, flags=re.DOTALL)
 
           path.write_text(text, encoding="utf-8")
           print("✅ build.gradle patched successfully")
