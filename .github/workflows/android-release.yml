@@ -54,7 +54,6 @@ env:
   RN_VERSION:    '0.76.5'
   APP_NAME:      'Maternellea'
   BUNDLE_ID:     'com.maternellea.app'
-  
 
 jobs:
   build-and-release:
@@ -89,7 +88,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          
 
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
@@ -113,11 +111,15 @@ jobs:
               --directory /tmp/rn-template \
               --title "${{ env.APP_NAME }}" \
               --package "${{ env.BUNDLE_ID }}"
-
-
-           if [ -d "/tmp/rn-template/android" ]; then   
-            cp -r /tmp/rn-template/android ./android
-            rm -rf /tmp/rn-template
+            
+            if [ -d "/tmp/rn-template/android" ]; then
+              cp -r /tmp/rn-template/android ./android
+              echo "✅ Dossier android copié"
+              rm -rf /tmp/rn-template
+            else
+              echo "❌ Erreur : dossier android non généré"
+              exit 1
+            fi
           else
             echo "✅ Dossier Android existant, utilisation existante"
           fi
@@ -164,11 +166,11 @@ jobs:
             sed -i '/MYAPP_UPLOAD_KEY_PASSWORD/d' android/gradle.properties || true
             
             cat >> android/gradle.properties << EOF
-            MYAPP_UPLOAD_STORE_FILE=maternellea.keystore
-            MYAPP_UPLOAD_KEY_ALIAS=${KEY_ALIAS}
-            MYAPP_UPLOAD_STORE_PASSWORD=${STORE_PASSWORD}
-            MYAPP_UPLOAD_KEY_PASSWORD=${KEY_PASSWORD}
-            EOF
+MYAPP_UPLOAD_STORE_FILE=maternellea.keystore
+MYAPP_UPLOAD_KEY_ALIAS=${KEY_ALIAS}
+MYAPP_UPLOAD_STORE_PASSWORD=${STORE_PASSWORD}
+MYAPP_UPLOAD_KEY_PASSWORD=${KEY_PASSWORD}
+EOF
             
             echo "✅ Configuration de signature ajoutée"
           else
@@ -178,44 +180,44 @@ jobs:
       - name: Patch build.gradle with signingConfigs
         run: |
           python3 << 'PYEOF'
-          import re
-          import pathlib
-          
-          path = pathlib.Path('android/app/build.gradle')
-          text = path.read_text()
-          
-          if 'signingConfigs {' not in text:
-              signing_config = '''
-              
-              signingConfigs {
-                  release {
-                      if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-                          storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                          storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                          keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                          keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-                      }
-                  }
-              }
-              '''
-              
-              text = re.sub(
-                  r'(android\s*\{)',
-                  r'\1' + signing_config,
-                  text, count=1
-              )
-              
-              text = re.sub(
-                  r'(buildTypes\s*\{[^}]*release\s*\{)',
-                  r'\1\n            signingConfig signingConfigs.release',
-                  text, count=1
-              )
-              
-              path.write_text(text)
-              print('✅ build.gradle patched with signing config')
-          else:
-              print('✅ Signing config already present')
-          PYEOF
+import re
+import pathlib
+
+path = pathlib.Path('android/app/build.gradle')
+text = path.read_text()
+
+if 'signingConfigs {' not in text:
+    signing_config = '''
+
+    signingConfigs {
+        release {
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
+    }
+'''
+    
+    text = re.sub(
+        r'(android\s*\{)',
+        r'\1' + signing_config,
+        text, count=1
+    )
+    
+    text = re.sub(
+        r'(buildTypes\s*\{[^}]*release\s*\{)',
+        r'\1\n            signingConfig signingConfigs.release',
+        text, count=1
+    )
+    
+    path.write_text(text)
+    print('✅ build.gradle patched with signing config')
+else:
+    print('✅ Signing config already present')
+PYEOF
 
       - name: Create JS bundle for Android
         run: |
