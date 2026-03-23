@@ -72,10 +72,27 @@ jobs:
         run: |
           npm install --legacy-peer-deps
 
-      - name: Ensure React Native CLI is installed
+      - name: Ensure React Native CLI and Metro config deps are installed
         shell: bash
         run: |
-          npm install -D @react-native-community/cli@${{ env.RN_CLI_VERSION }} --legacy-peer-deps
+          npm install -D \
+            @react-native-community/cli@${{ env.RN_CLI_VERSION }} \
+            @react-native/metro-config@${{ env.RN_VERSION }} \
+            --legacy-peer-deps
+
+      - name: Ensure Metro config exists
+        shell: bash
+        run: |
+          if [ ! -f "metro.config.js" ]; then
+            cat > metro.config.js <<'EOF'
+const { getDefaultConfig } = require('@react-native/metro-config');
+
+module.exports = getDefaultConfig(__dirname);
+EOF
+            echo "✅ metro.config.js créé"
+          else
+            echo "✅ metro.config.js déjà présent"
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -119,15 +136,30 @@ jobs:
       - name: Patch versionCode and versionName
         shell: bash
         run: |
-          sed -i \
-            "s/versionCode [0-9]\+/versionCode ${{ steps.version.outputs.version_code }}/g" \
-            android/app/build.gradle
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i \
+              "s/versionCode [0-9]\+/versionCode ${{ steps.version.outputs.version_code }}/g" \
+              android/app/build.gradle
 
-          sed -i \
-            "s/versionName \"[^\"]*\"/versionName \"${{ steps.version.outputs.version_name }}\"/g" \
-            android/app/build.gradle
+            sed -i \
+              "s/versionName \"[^\"]*\"/versionName \"${{ steps.version.outputs.version_name }}\"/g" \
+              android/app/build.gradle
 
-          echo "✅ Version patchée: code=${{ steps.version.outputs.version_code }}, name=${{ steps.version.outputs.version_name }}"
+            echo "✅ Version patchée dans build.gradle"
+          elif [ -f "android/app/build.gradle.kts" ]; then
+            sed -i \
+              "s/versionCode = [0-9]\+/versionCode = ${{ steps.version.outputs.version_code }}/g" \
+              android/app/build.gradle.kts
+
+            sed -i \
+              "s/versionName = \"[^\"]*\"/versionName = \"${{ steps.version.outputs.version_name }}\"/g" \
+              android/app/build.gradle.kts
+
+            echo "✅ Version patchée dans build.gradle.kts"
+          else
+            echo "❌ build.gradle introuvable"
+            exit 1
+          fi
 
       - name: Decode keystore
         env:
@@ -168,49 +200,113 @@ jobs:
             echo "⚠️ Secrets de signature non définis, build non signé"
           fi
 
-      - name: Patch build.gradle with signingConfigs
+      - name: Patch build.gradle with signing config
         shell: bash
         run: |
-          python3 << 'PYEOF'
-          import pathlib
+          python3 <<'PYEOF'
+          from pathlib import Path
           import re
+          import sys
 
-          path = pathlib.Path("android/app/build.gradle")
-          text = path.read_text(encoding="utf-8")
+          gradle_path = Path("android/app/build.gradle")
+          gradle_kts_path = Path("android/app/build.gradle.kts")
 
-          if "MYAPP_UPLOAD_STORE_FILE" not in text:
-              android_block_pattern = r"android\s*\{"
-              signing_block = """
-          android {
-              signingConfigs {
-                  release {
-                      if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-                          storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                          storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                          keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                          keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-                      }
-                  }
+          if gradle_path.exists():
+              path = gradle_path
+              text = path.read_text(encoding="utf-8")
+
+              if "MYAPP_UPLOAD_STORE_FILE" not in text:
+                  if "signingConfigs {" not in text:
+                      text = re.sub(
+                          r"(android\s*\{)",
+                          r"""\1
+
+      signingConfigs {
+          release {
+              if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                  storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                  storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                  keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                  keyPassword MYAPP_UPLOAD_KEY_PASSWORD
               }
-          """
-              text = re.sub(android_block_pattern, signing_block, text, count=1)
+          }
+      }""",
+                          text,
+                          count=1,
+                      )
 
-          release_pattern = r"(release\s*\{)"
-          if "signingConfig signingConfigs.release" not in text:
-              text = re.sub(release_pattern, r"\\1\n            signingConfig signingConfigs.release", text, count=1)
+                  text = re.sub(
+                      r"(buildTypes\s*\{[\s\S]*?release\s*\{)",
+                      r"\1\n            signingConfig signingConfigs.release",
+                      text,
+                      count=1,
+                  )
 
-          path.write_text(text, encoding="utf-8")
-          print("✅ build.gradle patched with signing config")
+                  path.write_text(text, encoding="utf-8")
+                  print("✅ build.gradle patché avec signingConfigs")
+              else:
+                  print("✅ Signing config déjà présent")
+          elif gradle_kts_path.exists():
+              path = gradle_kts_path
+              text = path.read_text(encoding="utf-8")
+
+              if "MYAPP_UPLOAD_STORE_FILE" not in text:
+                  if "signingConfigs {" not in text:
+                      text = re.sub(
+                          r"(android\s*\{)",
+                          r'''\1
+
+      signingConfigs {
+          create("release") {
+              if (project.hasProperty("MYAPP_UPLOAD_STORE_FILE")) {
+                  storeFile = file(MYAPP_UPLOAD_STORE_FILE as String)
+                  storePassword = MYAPP_UPLOAD_STORE_PASSWORD as String
+                  keyAlias = MYAPP_UPLOAD_KEY_ALIAS as String
+                  keyPassword = MYAPP_UPLOAD_KEY_PASSWORD as String
+              }
+          }
+      }''',
+                          text,
+                          count=1,
+                      )
+
+                  text = re.sub(
+                      r"(getByName\(\"release\"\)\s*\{)",
+                      r'\1\n            signingConfig = signingConfigs.getByName("release")',
+                      text,
+                      count=1,
+                  )
+
+                  path.write_text(text, encoding="utf-8")
+                  print("✅ build.gradle.kts patché avec signingConfigs")
+              else:
+                  print("✅ Signing config déjà présent")
+          else:
+              print("❌ Aucun fichier build.gradle ou build.gradle.kts trouvé")
+              sys.exit(1)
           PYEOF
 
       - name: Create JS bundle for Android
         shell: bash
         run: |
           mkdir -p android/app/src/main/assets
+
+          ENTRY_FILE="index.js"
+          if [ ! -f "$ENTRY_FILE" ]; then
+            if [ -f "index.ts" ]; then
+              ENTRY_FILE="index.ts"
+            elif [ -f "index.tsx" ]; then
+              ENTRY_FILE="index.tsx"
+            else
+              echo "❌ Aucun fichier d'entrée trouvé (index.js / index.ts / index.tsx)"
+              exit 1
+            fi
+          fi
+
           npx react-native bundle \
             --platform android \
             --dev false \
-            --entry-file index.js \
+            --entry-file "$ENTRY_FILE" \
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
 
@@ -241,7 +337,6 @@ jobs:
         shell: bash
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-
           mkdir -p artifacts
 
           APK_UNIVERSAL="android/app/build/outputs/apk/release/app-release.apk"
@@ -283,38 +378,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: maternellea-build-${{ steps.version.outputs.tag }}
-          path: ${{ env.ARTIFACTS_PATH }}
-          retention-days: 30
-          compression-level: 6
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.release_name }}
-          body: |
-            ## 🚀 Maternellea — ${{ steps.version.outputs.release_name }}
-
-            ### 📱 Téléchargement
-
-            | Type | Fichier | Description |
-            |------|---------|-------------|
-            | **APK Universal** | `Maternellea-${{ steps.version.outputs.tag }}-universal.apk` | Compatible avec tous les appareils Android |
-            | **APK ARM64** | `Maternellea-${{ steps.version.outputs.tag }}-arm64-v8a.apk` | Optimisé pour les appareils modernes |
-            | **APK ARMv7** | `Maternellea-${{ steps.version.outputs.tag }}-armeabi-v7a.apk` | Pour les appareils plus anciens |
-            | **AAB** | `Maternellea-${{ steps.version.outputs.tag }}.aab` | Pour le Play Store |
-
-            ### 📋 Informations de build
-
-            - **Version:** ${{ steps.version.outputs.version_name }}
-            - **Version Code:** ${{ steps.version.outputs.version_code }}
-            - **Branch:** `${{ github.ref_name }}`
-            - **Commit:** `${{ github.sha }}`
-            - **React Native:** ${{ env.RN_VERSION }}
-
-            ### ✅ Checksums
-
-            Les checksums SHA256 sont disponibles dans le fichier `checksums.txt`.
-          files: ${{ env.ARTIFACTS_PATH }}/*
-          draft: false
-          prerelease: false
+          path: ${{ env.ART
