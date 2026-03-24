@@ -100,35 +100,27 @@ jobs:
         run: |
           if [ ! -f "android/build.gradle" ]; then
             echo "📱 Création du projet Android (manquant ou incomplet)..."
-            rm -rf /tmp/rn-template
-            rm -rf android # Nettoyage si dossier vide existant
+            rm -rf android # Nettoyage complet
+            
+            # Utilisation de init-native pour générer les dossiers natifs
+            npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init-native android \
+              --platform android \
+              --project-name maternellea \
+              --template react-native-template-typescript
 
-            npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init MaternelleaTemp \
-              --version ${{ env.RN_VERSION }} \
-              --skip-install \
-              --directory /tmp/rn-template \
-              --title "${{ env.APP_NAME }}" \
-              --package-name "${{ env.BUNDLE_ID }}"
-
-            if [ -d "/tmp/rn-template/android" ]; then
+            # Vérification du succès
+            if [ ! -f "android/build.gradle" ]; then
+              echo "❌ Échec de la génération automatique, tentative via init complet..."
+              rm -rf /tmp/rn-template
+              npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init MaternelleaTemp \
+                --version ${{ env.RN_VERSION }} --skip-install --directory /tmp/rn-template
               cp -r /tmp/rn-template/android ./android
-              echo "✅ Dossier android généré et copié"
-            else
-              echo "❌ Le dossier /tmp/rn-template/android n'a pas été généré"
-              exit 1
-            fi
-
-            if [ -d "/tmp/rn-template/ios" ] && [ ! -d "ios/Maternellea.xcodeproj" ]; then
-              rm -rf ios
               cp -r /tmp/rn-template/ios ./ios
-              echo "✅ Dossier ios généré et copié"
             fi
-
-            rm -rf /tmp/rn-template
+            echo "✅ Dossier android prêt"
           else
-            echo "✅ Dossier Android valide existant, utilisation du dossier actuel"
+            echo "✅ Dossier Android valide existant"
           fi
-
           mkdir -p android/app/src/main/assets
 
       - name: Patch versionCode and versionName
@@ -156,32 +148,38 @@ jobs:
             echo "⚠️ KEYSTORE_BASE64 non défini, signature ignorée"
           fi
 
-      - name: Write gradle signing config
+      - name: Write gradle signing config & Fix New Arch
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         shell: bash
         run: |
+          # 1. Config de signature
           if [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ] && [ -n "$STORE_PASSWORD" ]; then
             touch android/gradle.properties
-
             sed -i '/^MYAPP_UPLOAD_STORE_FILE=/d' android/gradle.properties || true
             sed -i '/^MYAPP_UPLOAD_KEY_ALIAS=/d' android/gradle.properties || true
             sed -i '/^MYAPP_UPLOAD_STORE_PASSWORD=/d' android/gradle.properties || true
             sed -i '/^MYAPP_UPLOAD_KEY_PASSWORD=/d' android/gradle.properties || true
-
             {
               echo "MYAPP_UPLOAD_STORE_FILE=maternellea.keystore"
               echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
               echo "MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD"
               echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
             } >> android/gradle.properties
-
             echo "✅ Configuration de signature ajoutée"
-          else
-            echo "⚠️ Secrets de signature non définis, build non signé"
           fi
+
+          # 2. Forcer New Architecture si nécessaire ou assurer Hermes
+          # Note: React Native 0.76 préfère New Arch, mais on peut forcer true/false ici
+          # On s'assure que hermesEnabled est true pour la performance
+          if ! grep -q "hermesEnabled" android/gradle.properties; then
+            echo "hermesEnabled=true" >> android/gradle.properties
+          fi
+          
+          # 3. Patch pour cmake_path si nécessaire (connu pour corriger certains linking errors)
+          echo "android.ndkVersion=26.1.10909125" >> android/gradle.properties
 
       - name: Patch build.gradle (Signing & Icons)
         shell: bash
