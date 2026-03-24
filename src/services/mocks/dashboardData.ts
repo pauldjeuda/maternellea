@@ -284,7 +284,7 @@ export const MOCK_ARTICLES: Article[] = [
   {
     id: 'art-001',
     title: 'Comprendre votre fenêtre fertile',
-    summary: 'La fenêtre fertile dure environ 6 jours par cycle. Voici comment l'identifier avec précision.',
+    summary: "La fenêtre fertile dure environ 6 jours par cycle. Voici comment l'identifier avec précision.",
     content: '...',
     category: 'cycle',
     readTimeMinutes: 4,
@@ -306,7 +306,7 @@ export const MOCK_ARTICLES: Article[] = [
   {
     id: 'art-003',
     title: 'Le 4ème trimestre : s\'adapter au rythme de bébé',
-    summary: 'Les 3 premiers mois après la naissance sont une période d'adaptation intense pour toute la famille.',
+    summary: "Les 3 premiers mois après la naissance sont une période d'adaptation intense pour toute la famille.",
     content: '...',
     category: 'postpartum',
     readTimeMinutes: 5,
