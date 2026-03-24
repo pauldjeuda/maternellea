@@ -98,9 +98,10 @@ jobs:
       - name: Scaffold Android native project
         shell: bash
         run: |
-          if [ ! -d "android" ]; then
-            echo "📱 Création du projet Android..."
+          if [ ! -f "android/build.gradle" ]; then
+            echo "📱 Création du projet Android (manquant ou incomplet)..."
             rm -rf /tmp/rn-template
+            rm -rf android # Nettoyage si dossier vide existant
 
             npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init MaternelleaTemp \
               --version ${{ env.RN_VERSION }} \
@@ -111,15 +112,21 @@ jobs:
 
             if [ -d "/tmp/rn-template/android" ]; then
               cp -r /tmp/rn-template/android ./android
-              echo "✅ Dossier android copié"
+              echo "✅ Dossier android généré et copié"
             else
               echo "❌ Le dossier /tmp/rn-template/android n'a pas été généré"
               exit 1
             fi
 
+            if [ -d "/tmp/rn-template/ios" ] && [ ! -d "ios/Maternellea.xcodeproj" ]; then
+              rm -rf ios
+              cp -r /tmp/rn-template/ios ./ios
+              echo "✅ Dossier ios généré et copié"
+            fi
+
             rm -rf /tmp/rn-template
           else
-            echo "✅ Dossier Android existant, utilisation du dossier actuel"
+            echo "✅ Dossier Android valide existant, utilisation du dossier actuel"
           fi
 
           mkdir -p android/app/src/main/assets
@@ -255,7 +262,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew clean
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Collect and rename artifacts
         shell: bash
@@ -278,11 +285,12 @@ jobs:
             fi
           done
 
-          AAB="android/app/build/outputs/bundle/release/app-release.aab"
-          if [ -f "$AAB" ]; then
-            cp "$AAB" "artifacts/Maternellea-${TAG}.aab"
-            echo "✅ AAB créé"
-          fi
+          # AAB désactivé selon la demande de l'utilisateur
+          # AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          # if [ -f "$AAB" ]; then
+          #   cp "$AAB" "artifacts/Maternellea-${TAG}.aab"
+          #   echo "✅ AAB créé"
+          # fi
 
           if [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
             echo "❌ Aucun artifact n'a été généré"
@@ -322,7 +330,6 @@ jobs:
             | **APK Universal** | `Maternellea-${{ steps.version.outputs.tag }}-universal.apk` | Compatible avec tous les appareils Android |
             | **APK ARM64** | `Maternellea-${{ steps.version.outputs.tag }}-arm64-v8a.apk` | Optimisé pour les appareils modernes |
             | **APK ARMv7** | `Maternellea-${{ steps.version.outputs.tag }}-armeabi-v7a.apk` | Pour les appareils plus anciens |
-            | **AAB** | `Maternellea-${{ steps.version.outputs.tag }}.aab` | Pour le Play Store |
 
             ### 📋 Informations de build
 
