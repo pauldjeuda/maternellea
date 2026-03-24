@@ -99,25 +99,33 @@ jobs:
         shell: bash
         run: |
           if [ ! -f "android/build.gradle" ]; then
-            echo "📱 Création du projet Android (manquant ou incomplet)..."
-            rm -rf android # Nettoyage complet
+            echo "📱 Création du projet Android (via template temporaire)..."
+            rm -rf /tmp/rn-template
+            rm -rf android # Nettoyage si existant
             
-            # Utilisation de init-native pour générer les dossiers natifs
-            npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init-native android \
-              --platform android \
-              --project-name maternellea \
-              --template react-native-template-typescript
+            # On utilise init dans un dossier temporaire pour ne pas écraser les fichiers sources
+            npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init MaternelleaTemp \
+              --version ${{ env.RN_VERSION }} \
+              --skip-install \
+              --directory /tmp/rn-template \
+              --title "${{ env.APP_NAME }}" \
+              --package-name "${{ env.BUNDLE_ID }}"
 
-            # Vérification du succès
-            if [ ! -f "android/build.gradle" ]; then
-              echo "❌ Échec de la génération automatique, tentative via init complet..."
-              rm -rf /tmp/rn-template
-              npx @react-native-community/cli@${{ env.RN_CLI_VERSION }} init MaternelleaTemp \
-                --version ${{ env.RN_VERSION }} --skip-install --directory /tmp/rn-template
+            if [ -d "/tmp/rn-template/android" ]; then
               cp -r /tmp/rn-template/android ./android
-              cp -r /tmp/rn-template/ios ./ios
+              echo "✅ Dossier android généré et copié"
+            else
+              echo "❌ Échec de la génération du dossier android"
+              exit 1
             fi
-            echo "✅ Dossier android prêt"
+
+            if [ -d "/tmp/rn-template/ios" ] && [ ! -d "ios/Maternellea.xcodeproj" ]; then
+              rm -rf ios
+              cp -r /tmp/rn-template/ios ./ios
+              echo "✅ Dossier ios généré et copié"
+            fi
+
+            rm -rf /tmp/rn-template
           else
             echo "✅ Dossier Android valide existant"
           fi
