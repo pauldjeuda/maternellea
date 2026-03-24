@@ -38,7 +38,7 @@
 
     "@notifee/react-native": "^9.1.7",
 
-    "react-native-svg": "^15.8.0",
+    "react-native-svg": "15.15.0",
 
     "react-native-mmkv": "^3.2.0",
     "immer": "^10.1.1"
